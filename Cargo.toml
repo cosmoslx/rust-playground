@@ -2,6 +2,7 @@
 name = "rust-playground"
 version = "0.1.0"
 authors = ["cosmoslx <cosmoslx@gmail.com>"]
+edition = "2021"
 
 [lib]
 path ="./src/lib/lib.rs"
