@@ -7,8 +7,6 @@
 #![allow(unused_variables)]
 #![allow(dead_code)]
 
-use rust_playground::usage_async;
-
 fn main() {
-    usage_async::use_async_await();
+    println!("Hello, world!");
 }

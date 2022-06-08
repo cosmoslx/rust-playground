@@ -4,6 +4,7 @@ pub fn use_async_await() {
     use futures::executor::block_on;
     use std::thread::sleep;
     use std::time::Duration;
+    use super::usage_future::TimerFuture;
 
     struct Song {
         author: String,
@@ -12,7 +13,9 @@ pub fn use_async_await() {
 
     async fn learn_song() -> Song {
         println!("Learning a song...");
+
         //sleep(Duration::from_secs(2));
+        TimerFuture::new(Duration::from_secs(2)).await;
 
         Song {
             author: "The Beatles".to_string(),
@@ -26,7 +29,10 @@ pub fn use_async_await() {
 
     async fn dance() {
         println!("Dancing...");
+
         //sleep(Duration::from_secs(3));
+        TimerFuture::new(Duration::from_secs(3)).await;
+
         println!("Dance is over");
     }
 
