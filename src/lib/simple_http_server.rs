@@ -6,6 +6,11 @@ use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
+use async_std::task;
+use async_std::net as async_net;
+use async_std::io::{ReadExt, WriteExt}; 
+use futures::stream::StreamExt;
+
 pub fn start_server() {
     let listener = TcpListener::bind("127.0.0.1:8080").unwrap();
     let pool = ThreadPool::new(4);
@@ -15,6 +20,10 @@ pub fn start_server() {
 
         println!("Connection established!");
 
+        // single thread version
+        //handle_connection(stream);
+
+        // thread pool version
         pool.execute(|| {
             handle_connection(stream);
         });
@@ -52,6 +61,69 @@ fn handle_connection(mut stream: TcpStream) {
 
     Write::write(&mut stream, response.as_bytes()).unwrap();
     stream.flush().unwrap();
+}
+
+pub async fn start_server_async() {
+    let listener = async_net::TcpListener::bind("127.0.0.1:8080").await.unwrap();
+
+    listener
+        .incoming()
+        .for_each_concurrent(None, |tcp_stream| async move {
+            println!("Connection established!");
+            let tcp_stream = tcp_stream.unwrap();
+
+            handle_connection_async(tcp_stream).await;
+
+            // muti-thread with async
+            //task::spawn(handle_connection_async(tcp_stream));
+        })
+        .await;
+
+    // can not currently run
+    /*
+    let mut incoming = listener.incoming();
+
+    while let Some(stream) = incoming.next().await {
+        println!("Connection established!");
+        let stream = stream.unwrap();
+        handle_connection_async(stream).await;
+    }
+    */
+
+    println!("Shutting down.");
+}
+
+async fn handle_connection_async(mut stream: async_net::TcpStream) {
+    let mut buffer = [0; 1024];
+
+    stream.read(&mut buffer).await.unwrap();
+    //println!("Request: \n{}", String::from_utf8_lossy(&buffer[..]));
+
+    let get = b"GET / HTTP/1.1\r\n";
+    let sleep = b"GET /sleep HTTP/1.1\r\n";
+
+    let (status_line, filename) = if buffer.starts_with(get) {
+        ("HTTP/1.1 200 OK", "resource/hello.html")
+    } else if buffer.starts_with(sleep) {
+        //thread::sleep(Duration::from_secs(5));
+        task::sleep(Duration::from_secs(5)).await;
+        ("HTTP/1.1 200 OK", "resource/hello.html")
+    } else {
+        ("HTTP/1.1 404 NOT FOUND", "resource/404.html")
+    };
+
+    let contents = fs::read_to_string(filename).unwrap();
+
+    let response = format!(
+        "{}\r\nContent-Length: {}\r\n\r\n{}",
+        status_line,
+        contents.len(),
+        contents
+    );
+
+    stream.write(response.as_bytes()).await.unwrap();
+    stream.flush().await.unwrap();
+
 }
 
 type Job = Box<dyn FnOnce() + Send + 'static>;
