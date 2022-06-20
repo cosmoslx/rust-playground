@@ -5,11 +5,95 @@ use std::net::TcpStream;
 use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 use std::time::Duration;
+use std::marker::Unpin;
 
 use async_std::task;
 use async_std::net as async_net;
+use async_std::io as async_io;
 use async_std::io::{ReadExt, WriteExt}; 
 use futures::stream::StreamExt;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use futures::task::{Poll, Context};
+
+    use pretty_assertions::assert_eq;
+    use std::cmp::min;
+    use std::pin::Pin;
+    use std::marker::Unpin;
+
+    struct MockTcpStream {
+        read_buffer: Vec<u8>,
+        write_buffer: Vec<u8>,
+    }
+
+    impl async_io::Read for MockTcpStream {
+        fn poll_read(
+            self: Pin<&mut Self>,
+            _cx: &mut Context<'_>,
+            buf: &mut [u8],
+        ) -> Poll<async_io::Result<usize>> {
+            let size: usize = min(self.read_buffer.len(), buf.len());
+            buf[..size].copy_from_slice(&self.read_buffer[..size]);
+
+            Poll::Ready(Ok(size))
+        }
+    }
+
+    impl async_io::Write for MockTcpStream {
+        fn poll_write(
+            mut self: Pin<&mut Self>,
+            _cx: &mut Context<'_>,
+            buf: &[u8],
+        ) -> Poll<async_io::Result<usize>> {
+            self.write_buffer = Vec::from(buf);
+
+            Poll::Ready(Ok(buf.len()))
+        }
+
+        fn poll_flush(
+            self: Pin<&mut Self>,
+            _cx: &mut Context<'_>,
+        ) -> Poll<async_io::Result<()>> {
+            Poll::Ready(Ok(()))
+        }
+
+        fn poll_close(
+            self: Pin<&mut Self>,
+            _cx: &mut Context<'_>,
+        ) -> Poll<async_io::Result<()>> {
+            Poll::Ready(Ok(()))
+        }
+    }
+
+    impl Unpin for MockTcpStream { }
+
+    #[async_std::test]
+    async fn test_handle_connection_async() {
+        let input_bytes = b"GET / HTTP/1.1\r\n";
+        let mut contents = vec![0u8; 1024];
+        contents[..input_bytes.len()].clone_from_slice(input_bytes);
+
+        let mut stream = MockTcpStream {
+            read_buffer: contents,
+            write_buffer: vec![],
+        };
+
+        handle_connection_async(&mut stream).await;
+        let mut buf = [0u8; 1024];
+        stream.read(&mut buf).await.unwrap();
+
+        let expected_contents = fs::read_to_string("resource/hello.html").unwrap();
+        let expected_response = format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n{}",
+                                                expected_contents.len(),
+                                                expected_contents);
+        //println!("[1] {}", expected_response);
+        //println!("[2] {}", String::from_utf8_lossy(&stream.write_buffer));
+        assert_eq!(expected_response.as_bytes(), stream.write_buffer);
+    }
+
+}
 
 pub fn start_server() {
     let listener = TcpListener::bind("127.0.0.1:8080").unwrap();
@@ -93,7 +177,7 @@ pub async fn start_server_async() {
     println!("Shutting down.");
 }
 
-async fn handle_connection_async(mut stream: async_net::TcpStream) {
+async fn handle_connection_async(mut stream: impl async_io::Read + async_io::Write + Unpin) {
     let mut buffer = [0; 1024];
 
     stream.read(&mut buffer).await.unwrap();
